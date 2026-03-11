@@ -1,0 +1,14 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Saved player profiles (runtime data, not source)
+profiles/saves/
+
+# macOS
+.DS_Store
+
+# VSCode / IDE
+.vscode/
+.idea/

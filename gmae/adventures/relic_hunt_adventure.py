@@ -239,6 +239,25 @@ class RelicHuntAdventure(IMiniAdventure):
         p1 = self._players[1]
         p2 = self._players[2]
 
+        # Check player hp
+        # Check for death condition FIRST
+        if p1.health <= 0 or p2.health <= 0:
+            if p1.health <= 0 and p2.health <= 0:
+                self._status = AdventureStatus.DRAW
+            else:
+                self._status = AdventureStatus.WIN
+
+            if self._quest_event:
+                self._quest_event.mark_completed()
+
+            game_events.publish(
+                "adventure_completed",
+                adventure=self.name,
+                result=self._status.value
+            )
+
+            return self._status
+
         # Check target score reached
         if p1.score >= self._target_score or p2.score >= self._target_score:
             self._status = AdventureStatus.WIN
@@ -279,6 +298,12 @@ class RelicHuntAdventure(IMiniAdventure):
         p2 = self._players.get(2)
         if not p1 or not p2:
             return None
+        if p1.health <= 0 and p2.health <= 0:
+            return None
+        if p1.health <= 0:
+            return 2
+        elif p2.health <= 0:
+            return 1
         if p1.score > p2.score:
             return 1
         elif p2.score > p1.score:

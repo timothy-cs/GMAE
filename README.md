@@ -14,7 +14,7 @@ Run directly from project directory
 
 ## Basic Usage
 
-The application is fully menu-driven. All interaction happens through numbered CLI menus. The application will first ask for each player's display name, character class, and perferred realm. The application will then create profiles for each player. 
+The application is fully menu-driven. All interaction happens through numbered CLI menus. The application will first ask for each player's display name, character class, and preferred realm. The application will then create profiles for each player. 
 
 Then, it will display the main menu, where you can choose a mini-adventure to play by entering a number into the CLI that corresponds with its number on the menu. For now, the selectable mini-adventures are Escort Across the Realm (co-op) and Relic Hunt (competitive). 
 

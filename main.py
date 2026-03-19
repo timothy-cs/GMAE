@@ -133,11 +133,19 @@ def run_game_loop(engine: GMEngine) -> None:
             print(adventure.render())
             print()
 
-            # Show valid actions
+                        # Show valid actions
             p1_actions = adventure.get_valid_actions(1)
             p2_actions = adventure.get_valid_actions(2)
-            print(f"  P1 actions: {', '.join(p1_actions)}")
-            print(f"  P2 actions: {', '.join(p2_actions)}")
+
+            if p1_actions:
+                print(f"  P1 actions: {', '.join(p1_actions)}")
+            else:
+                print(f"  P1 actions: stunned")
+
+            if p2_actions:
+                print(f"  P2 actions: {', '.join(p2_actions)}")
+            else:
+                print(f"  P2 actions: stunned")
             print()
 
             # Access control check
@@ -146,9 +154,18 @@ def run_game_loop(engine: GMEngine) -> None:
                 print(f"  {ac_err}")
                 break
 
-            # Get inputs
-            p1_action = input_safe(f"  [{p1.display_name}] Action: ")
-            p2_action = input_safe(f"  [{p2.display_name}] Action: ")
+            # Get inputs, but skip stunned players
+            if p1_actions:
+                p1_action = input_safe(f"  [{p1.display_name}] Action: ")
+            else:
+                print(f"  [{p1.display_name}] is stunned.")
+                p1_action = "wait"
+
+            if p2_actions:
+                p2_action = input_safe(f"  [{p2.display_name}] Action: ")
+            else:
+                print(f"  [{p2.display_name}] is stunned.")
+                p2_action = "wait"
 
             # Process turn
             messages = session.process_turn(p1_action, p2_action)

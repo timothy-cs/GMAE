@@ -51,6 +51,7 @@ class RelicHuntAdventure(IMiniAdventure):
         self._quest_event: Optional[QuestEvent] = None
         self._clock = WorldClock()
         self._rng = random.Random()
+        self._stunned_players: set[int] = set()
 
     @property
     def name(self) -> str:
@@ -76,6 +77,7 @@ class RelicHuntAdventure(IMiniAdventure):
         self._session = session
         self._turn_count = 0
         self._status = AdventureStatus.IN_PROGRESS
+        self._stunned_players.clear()
 
         occupied: set[tuple[int, int]] = set()
 
@@ -111,14 +113,14 @@ class RelicHuntAdventure(IMiniAdventure):
             )
             self._relics.append(relic)
 
-        # Place hazards
+        # Place hazards at least 2 tiles away from players
         self._hazards.clear()
         for i in range(self._num_hazards):
-            r, c = self._random_empty_cell(occupied)
+            r, c = self._random_empty_cell_far_from_players(occupied, min_distance=2)
             occupied.add((r, c))
             h = HazardEntity(
                 entity_id=f"haz_{i}", name=f"Crystal Golem {i+1}",
-                symbol="H", row=r, col=c, damage=0,
+                symbol="H", row=r, col=c, damage=10,
                 patrol_direction=self._rng.choice([-1, 1]),
             )
             self._hazards.append(h)
@@ -143,9 +145,9 @@ class RelicHuntAdventure(IMiniAdventure):
         if not player:
             return "Invalid player."
 
-        # Check if player is stunned
-        if not player.is_alive():
-            return f"{player.name} is stunned and cannot act this turn."
+        if player_number in self._stunned_players:
+            self._stunned_players.remove(player_number)
+            return f"{player.name} is stunned."
 
         parts = action.lower().split()
         cmd = parts[0] if parts else ""
@@ -163,6 +165,7 @@ class RelicHuntAdventure(IMiniAdventure):
         new_c = player.col + dc
         if not self._realm.in_bounds(new_r, new_c):
             return f"{player.name} can't move there — out of bounds."
+
         player.move_to(new_r, new_c)
         msg = f"{player.name} moves {direction}."
 
@@ -173,10 +176,18 @@ class RelicHuntAdventure(IMiniAdventure):
                 relic.collected_by = player.player_number
                 player.score += relic.points
                 msg += f" Found {relic.name} (+{relic.points} pts, total: {player.score})!"
-                game_events.publish("relic_collected",
-                                    player=player.name,
-                                    relic=relic.name,
-                                    points=relic.points)
+                game_events.publish(
+                    "relic_collected",
+                    player=player.name,
+                    relic=relic.name,
+                    points=relic.points,
+                )
+
+        # Check hazard encounter after movement
+        hazard_msg = self._check_hazard_encounter(player)
+        if hazard_msg:
+            msg += f" {hazard_msg}"
+
         return msg
 
     def advance_turn(self) -> list[str]:
@@ -184,38 +195,15 @@ class RelicHuntAdventure(IMiniAdventure):
         self._turn_count += 1
         self._clock.advance(10)
 
-        # Move hazards horizontally
-        for h in self._hazards:
-            if h.is_stunned():
-                h.stunned_turns -= 1
-                continue
-            new_c = h.col + h.patrol_direction
-            if not self._realm.in_bounds(h.row, new_c):
-                h.patrol_direction *= -1
-                new_c = h.col + h.patrol_direction
-            if self._realm.in_bounds(h.row, new_c):
-                h.move_to(h.row, new_c)
-
-        # Hazard collision = stun player for 1 turn (lose next turn's health as indicator)
-        for h in self._hazards:
-            for p in self._players.values():
-                if h.position() == p.position() and p.is_alive():
-                    # Stun: temporarily set health to 0, restore next turn
-                    messages.append(f"{h.name} stuns {p.name}! They lose their next turn.")
-                    p.health = 0  # Mark as stunned
-
-        # Restore stunned players after processing
-        for p in self._players.values():
-            if p.health == 0:
-                p.health = p.max_health  # Recover immediately but action was lost
-
-        # Score update
         p1 = self._players[1]
         p2 = self._players[2]
         relics_left = sum(1 for r in self._relics if not r.collected)
-        messages.append(f"--- Turn {self._turn_count}/{self._max_turns} | "
-                        f"P1 Score: {p1.score} | P2 Score: {p2.score} | "
-                        f"Relics left: {relics_left} ---")
+
+        messages.append(
+            f"--- Turn {self._turn_count}/{self._max_turns} | "
+            f"P1 Score: {p1.score} | P2 Score: {p2.score} | "
+            f"Relics left: {relics_left} ---"
+        )
         return messages
 
     def get_state(self) -> AdventureState:
@@ -226,8 +214,8 @@ class RelicHuntAdventure(IMiniAdventure):
         entities.extend([r for r in self._relics if not r.collected])
         objectives = [
             f"First to {self._target_score} points wins!",
-            f"P1 Score: {self._players[1].score}",
-            f"P2 Score: {self._players[2].score}",
+            f"P1 Score: {self._players[1].score}, P1 HP: {self._players[1].max_health}",
+            f"P2 Score: {self._players[2].score}, P2 HP: {self._players[2].max_health}",
             f"Relics remaining: {sum(1 for r in self._relics if not r.collected)}",
             f"Turns remaining: {self._max_turns - self._turn_count}",
         ]
@@ -293,6 +281,7 @@ class RelicHuntAdventure(IMiniAdventure):
     def reset(self) -> None:
         self._turn_count = 0
         self._status = AdventureStatus.NOT_STARTED
+        self._stunned_players.clear()
         self._players.clear()
         self._relics.clear()
         self._hazards.clear()
@@ -326,12 +315,62 @@ class RelicHuntAdventure(IMiniAdventure):
         p1 = self._players.get(1)
         p2 = self._players.get(2)
         if p1:
-            lines.append(f"  P1 {p1.name}: Score {p1.score}")
+            lines.append(f"  P1 {p1.name}: Score {p1.score}, P1 HP: {self._players[1].health}")
         if p2:
-            lines.append(f"  P2 {p2.name}: Score {p2.score}")
+            lines.append(f"  P2 {p2.name}: Score {p2.score}, P2 HP: {self._players[2].health}")
         relics_left = sum(1 for r in self._relics if not r.collected)
         lines.append(f"  Relics remaining: {relics_left} | Target: {self._target_score} pts")
         return "\n".join(lines)
 
     def get_valid_actions(self, player_number: int) -> list[str]:
+        if player_number in self._stunned_players:
+            return []
         return ["north", "south", "east", "west", "wait"]
+
+    def _get_distance(self, a: tuple[int, int], b: tuple[int, int]) -> int:
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def _is_far_enough_from_players(self, row: int, col: int, min_distance: int = 2) -> bool:
+        for p in self._players.values():
+            if self._get_distance((row, col), (p.row, p.col)) < min_distance:
+                return False
+        return True
+
+    def _random_empty_cell_far_from_players(
+        self,
+        occupied: set[tuple[int, int]],
+        min_distance: int = 2,
+    ) -> tuple[int, int]:
+        while True:
+            r = self._rng.randint(0, self._realm.rows - 1)
+            c = self._rng.randint(0, self._realm.cols - 1)
+            if (r, c) in occupied:
+                continue
+            if not self._is_far_enough_from_players(r, c, min_distance):
+                continue
+            return r, c
+
+    def _relocate_hazard(self, hazard: HazardEntity) -> None:
+        occupied: set[tuple[int, int]] = set()
+
+        for p in self._players.values():
+            occupied.add((p.row, p.col))
+        for r in self._relics:
+            if not r.collected:
+                occupied.add((r.row, r.col))
+        for h in self._hazards:
+            if h is not hazard:
+                occupied.add((h.row, h.col))
+
+        new_r, new_c = self._random_empty_cell_far_from_players(occupied, min_distance=2)
+        hazard.move_to(new_r, new_c)
+
+    def _check_hazard_encounter(self, player: PlayerEntity) -> Optional[str]:
+        for h in self._hazards:
+            adjacent = abs(h.row - player.row) + abs(h.col - player.col) == 1
+            if adjacent:
+                self._stunned_players.add(player.player_number)
+                player.health = max(0, player.health - h.damage)
+                self._relocate_hazard(h)
+                return f"{player.name} is stunned by {h.name}! -{h.damage} HP."
+        return None

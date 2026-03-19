@@ -105,14 +105,12 @@ def create_profile(player_label: str) -> PlayerProfile:
 
 # ── Game loop ─────────────────────────────────────────────────
 def run_game_loop(engine: GMEngine) -> None:
+    clear_screen()
+    print_banner()
+    # Create profiles
+    p1 = create_profile("Player 1")
+    p2 = create_profile("Player 2")
     while True:
-        clear_screen()
-        print_banner()
-
-        # Create profiles
-        p1 = create_profile("Player 1")
-        p2 = create_profile("Player 2")
-
         # Show adventure menu
         print(engine.menu.display())
         while True:

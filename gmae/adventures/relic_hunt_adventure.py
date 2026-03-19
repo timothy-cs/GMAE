@@ -41,6 +41,7 @@ class RelicHuntAdventure(IMiniAdventure):
         self._target_score = target_score
         self._max_turns = max_turns
         self._num_relics = num_relics
+        self._pending_hazard_update = False
         self._num_hazards = num_hazards
         self._session: Optional[GameSession] = None
         self._players: dict[int, PlayerEntity] = {}
@@ -78,6 +79,7 @@ class RelicHuntAdventure(IMiniAdventure):
         self._turn_count = 0
         self._status = AdventureStatus.IN_PROGRESS
         self._stunned_players.clear()
+        self._pending_hazard_update = False
 
         occupied: set[tuple[int, int]] = set()
 
@@ -195,6 +197,11 @@ class RelicHuntAdventure(IMiniAdventure):
         self._turn_count += 1
         self._clock.advance(10)
 
+        if self._pending_hazard_update:
+            self._relocate_all_hazards()
+            self._pending_hazard_update = False
+            messages.append("The hazards shift to new positions.")
+
         p1 = self._players[1]
         p2 = self._players[2]
         relics_left = sum(1 for r in self._relics if not r.collected)
@@ -214,8 +221,8 @@ class RelicHuntAdventure(IMiniAdventure):
         entities.extend([r for r in self._relics if not r.collected])
         objectives = [
             f"First to {self._target_score} points wins!",
-            f"P1 Score: {self._players[1].score}, P1 HP: {self._players[1].max_health}",
-            f"P2 Score: {self._players[2].score}, P2 HP: {self._players[2].max_health}",
+            f"P1 Score: {self._players[1].score}, P1 HP: {self._players[1].health}",
+            f"P2 Score: {self._players[2].score}, P2 HP: {self._players[2].health}",
             f"Relics remaining: {sum(1 for r in self._relics if not r.collected)}",
             f"Turns remaining: {self._max_turns - self._turn_count}",
         ]
@@ -285,6 +292,7 @@ class RelicHuntAdventure(IMiniAdventure):
         self._players.clear()
         self._relics.clear()
         self._hazards.clear()
+        self._pending_hazard_update = False
         self._quest_event = None
 
     def render(self) -> str:
@@ -371,6 +379,22 @@ class RelicHuntAdventure(IMiniAdventure):
             if adjacent:
                 self._stunned_players.add(player.player_number)
                 player.health = max(0, player.health - h.damage)
-                self._relocate_hazard(h)
+                self._pending_hazard_update = True
                 return f"{player.name} is stunned by {h.name}! -{h.damage} HP."
         return None
+    
+    def _relocate_all_hazards(self) -> None:
+        occupied: set[tuple[int, int]] = set()
+
+        for p in self._players.values():
+            occupied.add((p.row, p.col))
+        for r in self._relics:
+            if not r.collected:
+                occupied.add((r.row, r.col))
+
+        for h in self._hazards:
+            new_r, new_c = self._random_empty_cell_far_from_players(
+                occupied, min_distance=2
+            )
+            h.move_to(new_r, new_c)
+            occupied.add((new_r, new_c))
